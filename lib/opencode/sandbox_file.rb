@@ -1,0 +1,81 @@
+# frozen_string_literal: true
+
+require "pathname"
+
+module Opencode
+  # One file living inside an Opencode::Sandbox.
+  #
+  # Carries the safety predicate inline (#safe?) so the orchestrator
+  # doesn't have to know what "safe" means — symlink, realpath inside
+  # the sandbox, size cap. Carries the default identity conversion to
+  # Artifact (#as_artifact) so non-transform code can attach a sandbox
+  # file as-is without re-implementing the marcel + StringIO ceremony.
+  #
+  # mtime-cutoff freshness lives on Opencode::Sandbox#files(after:),
+  # not here — the file doesn't know which turn opened "after." That's
+  # a property of the scan, not a property of the file.
+  class SandboxFile
+    attr_reader :path, :sandbox_prefix
+
+    def initialize(path:, sandbox_prefix:, max_bytes:)
+      @path           = path
+      @sandbox_prefix = sandbox_prefix
+      @max_bytes      = max_bytes
+    end
+
+    def basename
+      File.basename(path)
+    end
+
+    def size
+      File.size(path)
+    end
+
+    def mtime
+      File.mtime(path)
+    end
+
+    def content
+      File.read(path)
+    end
+
+    def content_type
+      Marcel::MimeType.for(name: basename)
+    end
+
+    # Defense-in-depth on individual file paths the scan yielded:
+    #
+    #   - Reject symlinks (no follow-the-link escape).
+    #   - The resolved realpath of the path must lie inside the sandbox
+    #     with a separator-terminated prefix so /sandbox-1 doesn't false-
+    #     positive on /sandbox-10/foo.
+    #   - Reject anything over the size cap (default
+    #     Opencode::ResponseParser::MAX_ARTIFACT_SIZE = 10 MB).
+    #
+    # The Sandbox scan filters non-files (directories, FIFOs) before
+    # yielding, so we don't re-check #file? here.
+    def safe?
+      return false if File.symlink?(path)
+      return false unless Pathname.new(path).realpath.to_s.start_with?(sandbox_prefix)
+      return false if size > @max_bytes
+
+      true
+    rescue Errno::ENOENT
+      # Concurrent deletion between scan-yield and safety-check — treat
+      # as unsafe so the orchestrator skips rather than crashing.
+      false
+    end
+
+    # Identity conversion: this sandbox file → an Artifact carrying the
+    # file's own bytes. Used by the substrate's default (non-transform)
+    # path for Blackline + Raven, whose agents write document bytes
+    # directly to the sandbox and expect them attached unchanged.
+    def as_artifact
+      Artifact.new(
+        filename:     basename,
+        content:      content,
+        content_type: content_type
+      )
+    end
+  end
+end

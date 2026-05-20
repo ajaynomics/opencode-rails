@@ -10,10 +10,12 @@
 
 require "opencode-ruby"
 
-require "active_support/core_ext/object/blank"
+require "active_support/core_ext/object/blank"      # blank?, present?, presence
 require "active_support/core_ext/object/try"
-require "active_support/core_ext/hash/keys"
-require "active_support/core_ext/string/inflections"
+require "active_support/core_ext/hash/keys"          # deep_stringify_keys, deep_symbolize_keys
+require "active_support/core_ext/string/inflections" # demodulize, underscore, camelize
+require "active_support/core_ext/string/filters"     # squish, truncate
+require "active_support/core_ext/numeric/time"       # 2.seconds, 5.minutes, etc.
 
 require_relative "opencode/rails/version"
 require_relative "opencode/error_reporter"
