@@ -49,6 +49,16 @@ class Opencode::LoadingTest < Minitest::Test
   end
 
   def test_version_constant
-    assert_match(/\A\d+\.\d+\.\d+/, Opencode::Rails::VERSION)
+    assert_match(/\A\d+\.\d+\.\d+/, Opencode::RAILS_VERSION)
+  end
+
+  def test_no_opencode_rails_module
+    # Defining Opencode::Rails as a module would shadow ::Rails for any
+    # host code that references top-level Rails.* from inside the
+    # Opencode:: namespace (e.g. lib/opencode/containers/container.rb).
+    # Verify the namespace stays clean — version lives at
+    # Opencode::RAILS_VERSION, not Opencode::Rails::VERSION.
+    refute Opencode.const_defined?(:Rails),
+      "Opencode::Rails must not be defined — it would shadow ::Rails inside the Opencode namespace"
   end
 end

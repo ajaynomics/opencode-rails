@@ -4,7 +4,7 @@ require_relative "lib/opencode/rails/version"
 
 Gem::Specification.new do |spec|
   spec.name          = "opencode-rails"
-  spec.version       = Opencode::Rails::VERSION
+  spec.version       = Opencode::RAILS_VERSION
   spec.authors       = ["Ajay Krishnan"]
   spec.email         = ["ajay@krishnan.ca"]
 
