@@ -1,0 +1,34 @@
+# Changelog
+
+## 0.0.1.alpha1 — 2026-05-20
+
+Initial public alpha. Extracted from a production multi-product Rails app (`ajent-rails`) where these objects shipped under `lib/opencode/rails/` before being carved out into a standalone gem.
+
+**Includes:**
+
+- `Opencode::Session` — AR-coupled, row-level-locked session lifecycle (`ensure!`, `recreate!`, `abort!`)
+- `Opencode::Turn` — orchestrator covering send → stream → recover → finalize, with CAS-safe message terminal-state transitions
+- `Opencode::Exchange` — domain object over a turn's message array; emits `opencode.apply_patch.artifacts_dropped` when post-write file content is unavailable
+- `Opencode::Artifact` — value-object (filename + content + content_type + trust metadata), idempotent attach
+- `Opencode::MessageArtifacts` — ActiveStorage-aware artifact attachment pipeline with transform support
+- `Opencode::Sandbox` — disk-backed sandbox reader, returns `Artifact` list
+- `Opencode::SandboxFile` — single-file value object (pathname → bytes/content-type)
+- `Opencode::Transform` — base class for content-rewriting transforms
+- `Opencode::Impostor` — ActiveStorage download/upload round-trip helper
+- `Opencode::UploadedFilesPrompt` — user-prompt prefix builder listing uploaded files, sandbox-path inverted (injection-based, no `Opencode::Permissions` reference)
+- `Opencode::ToolDisplay` — view-model for tool-call hashes (Turbo Stream-friendly)
+- `Opencode::ErrorReporter` — pluggable adapter mirroring the `Opencode::Instrumentation` pattern
+
+**Runtime dependencies:**
+
+- `opencode-ruby ~> 0.0.1.alpha1` (wire client + Reply state machine)
+- `activerecord >= 7.1, < 9.0`
+- `activestorage >= 7.1, < 9.0`
+- `activesupport >= 7.1, < 9.0`
+
+**Known limitations (alpha):**
+
+- Apply-patch tool's post-write file content is not extracted (wire-format limitation in OpenCode v1.15+); affected files surface via the `opencode.apply_patch.artifacts_dropped` instrumentation event. Future work: optional sandbox-read fallback path.
+- Smoke tests only inside the gem (14 tests). Behavioral coverage lives in the host app that originally produced this code (`ajent-rails`'s `test/lib/opencode/rails/`). Standalone gem-side test suite using Combustion is open work.
+- No generator (`rails g opencode:install`) yet.
+- No Rails Engine integration — `require "opencode-rails"` is sufficient.
