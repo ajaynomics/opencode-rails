@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.1.alpha3 - 2026-07-10
+
+### Bumped
+
+- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha3`, exposing
+  the session permission PATCH primitive to Rails host applications while
+  leaving reconciliation policy in each host.
+
 ## 0.0.1.alpha2 — 2026-05-20
 
 ### Changed

@@ -36,8 +36,8 @@ Gem::Specification.new do |spec|
   # The opencode-ruby gem provides the wire-level Client + Reply primitives
   # this gem builds on. During alpha both gems evolve in lockstep — we pin
   # exactly (= not ~>) so that consumers always pick the version this gem
-  # was tested against. Bump to alpha2 when the paired release ships.
-  spec.add_runtime_dependency "opencode-ruby", "= 0.0.1.alpha2"
+  # was tested against.
+  spec.add_runtime_dependency "opencode-ruby", "= 0.0.1.alpha3"
 
   # Rails sub-libraries used at runtime. Depending on these individually
   # (instead of the `rails` umbrella) avoids forcing host apps to load
