@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.1.alpha4 - 2026-07-12
+
+### Bumped
+
+- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha4`, adding
+  current `session.status` idle handling and correct multi-assistant tool-loop
+  finalization for Rails turns.
+
 ## 0.0.1.alpha3 - 2026-07-10
 
 ### Bumped
