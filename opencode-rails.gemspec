@@ -37,7 +37,7 @@ Gem::Specification.new do |spec|
   # this gem builds on. During alpha both gems evolve in lockstep — we pin
   # exactly (= not ~>) so that consumers always pick the version this gem
   # was tested against.
-  spec.add_runtime_dependency "opencode-ruby", "= 0.0.1.alpha4"
+  spec.add_runtime_dependency "opencode-ruby", "= 0.0.1.alpha5"
 
   # Rails sub-libraries used at runtime. Depending on these individually
   # (instead of the `rails` umbrella) avoids forcing host apps to load

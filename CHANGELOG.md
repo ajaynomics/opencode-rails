@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.1.alpha5 - 2026-07-15
+
+### Bumped
+
+- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha5`, exposing
+  native parent-linked and configured session creation to Rails hosts.
+
 ## 0.0.1.alpha4 - 2026-07-12
 
 ### Bumped
