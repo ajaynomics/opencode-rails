@@ -14,7 +14,7 @@ jobs:
       matrix:
         ruby: ["3.2", "3.3", "3.4"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Ruby ${{ matrix.ruby }}
         uses: ruby/setup-ruby@v1
@@ -29,11 +29,9 @@ jobs:
         run: gem build opencode-rails.gemspec
 
       - name: Verify gem loads after install
-        # opencode-rails depends on opencode-ruby; until both gems
-        # are on rubygems.org, the install step here will only resolve
-        # if opencode-ruby has been pre-installed or is reachable.
-        # When the gems do publish, the runtime_dependency on
-        # opencode-ruby will Just Work via rubygems.
         run: |
-          gem install --local opencode-rails-*.gem --conservative
+          client_dir="$(bundle show opencode-ruby)"
+          (cd "$client_dir" && gem build opencode-ruby.gemspec)
+          gem install "$client_dir"/opencode-ruby-*.gem --no-document
+          gem install opencode-rails-*.gem --no-document
           ruby -ropencode-rails -e 'puts Opencode::RAILS_VERSION'

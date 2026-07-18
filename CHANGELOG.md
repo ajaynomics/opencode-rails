@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.1.alpha6 - 2026-07-18
+
+### Bumped
+
+- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha6`. Rails turns
+  now establish and validate the OpenCode SSE subscription before submitting
+  `prompt_async`, and automatic SSE reconnects reopen only the subscription
+  without replaying the user prompt.
+
 ## 0.0.1.alpha5 - 2026-07-15
 
 ### Bumped
