@@ -3,11 +3,107 @@
 require "test_helper"
 
 # Contract smoke for Opencode::Turn (the orchestrator) and its inner
-# Result value object. Behavioral coverage (the full send -> stream ->
-# recover -> finalize loop) lives in the host application — Turn needs
-# an Opencode::Client, an AR Message, a subject record, etc., which are
-# all integration-level concerns.
+# Result value object. Most ActiveRecord behavior lives in host applications,
+# but the subscribe-before-prompt ordering is a cross-gem transport contract
+# and belongs here so a host cannot silently bypass opencode-ruby's guarantee.
 class Opencode::TurnTest < Minitest::Test
+  SESSION_ID = "ses_turn_test"
+
+  class FakeMessage
+    attr_reader :id, :finalized, :error_content
+    attr_accessor :cost, :input_tokens, :output_tokens, :tool_calls_json
+
+    def initialize
+      @id = 12
+    end
+
+    def reload = self
+    def cancelled? = false
+
+    def finalize!(**attrs)
+      @finalized = attrs
+      @cost = attrs[:cost]
+      @input_tokens = attrs[:input_tokens]
+      @output_tokens = attrs[:output_tokens]
+      @tool_calls_json = attrs[:tool_calls_json]
+      true
+    end
+
+    def error!(content)
+      @error_content = content
+    end
+  end
+
+  FakeSubject = Struct.new(:id, :opencode_session_id, keyword_init: true)
+
+  class FakeSession
+    def ensure!(_client) = SESSION_ID
+    def just_created? = false
+  end
+
+  class FakeObserver
+    def watch(_reply); end
+  end
+
+  class OrderedClient
+    attr_reader :order, :prompt_count, :message_reads
+
+    def initialize(prompt_error: nil)
+      @order = []
+      @prompt_count = 0
+      @message_reads = 0
+      @prompt_error = prompt_error
+    end
+
+    def get_messages(_session_id)
+      @message_reads += 1
+      @order << (@prompt_count.zero? ? :messages_before : :messages_after)
+      return [] if @prompt_count.zero?
+
+      [
+        { info: { role: "user" }, parts: [ { type: "text", text: "ping" } ] },
+        {
+          info: {
+            role: "assistant", finish: "stop",
+            time: { created: 1, completed: 2 },
+            cost: 0.01,
+            tokens: { input: 2, output: 1 }
+          },
+          parts: [ { type: "text", text: "pong" } ]
+        }
+      ]
+    end
+
+    def send_message_async(session_id, text, agent:, system:)
+      @prompt_count += 1
+      @order << :prompt
+      raise @prompt_error if @prompt_error
+
+      raise "wrong prompt" unless session_id == SESSION_ID && text == "ping"
+      raise "wrong routing" unless agent == "test-agent" && system == "test-system"
+
+      {}
+    end
+
+    def stream_events(session_id:, reply:, on_activity_tick:, on_subscribed:)
+      raise "wrong session" unless session_id == SESSION_ID
+      raise "missing reply" unless reply.is_a?(Opencode::Reply)
+      raise "missing activity callback" unless on_activity_tick.respond_to?(:call)
+
+      @order << :sse_ready
+      on_subscribed.call
+      @order << :sse_reconnected
+      on_subscribed.call
+      yield(
+        type: "message.part.delta",
+        properties: { sessionID: SESSION_ID, partID: "p1", field: "text", delta: "pong" }
+      )
+      yield(
+        type: "session.status",
+        properties: { sessionID: SESSION_ID, status: { type: "idle" } }
+      )
+    end
+  end
   REQUIRED_INIT_KEYS = %i[
     message subject query_text client session_for observer_factory
     system_context agent_name tracer
@@ -58,5 +154,57 @@ class Opencode::TurnTest < Minitest::Test
     assert_equal 0.012, result.cost
     assert_equal 100,   result.input_tokens
     assert_equal 50,    result.output_tokens
+  end
+
+  def test_turn_subscribes_before_prompt_and_never_reprompts_on_reconnect
+    client = OrderedClient.new
+    message = FakeMessage.new
+    results = []
+
+    build_turn(client:, message:, results:).call
+
+    assert_equal 1, client.prompt_count
+    assert_equal(
+      [ :messages_before, :sse_ready, :prompt, :sse_reconnected, :messages_after ],
+      client.order
+    )
+    assert_equal "pong", message.finalized.fetch(:content)
+    assert_nil message.error_content
+    assert results.last.completed?
+  end
+
+  def test_turn_does_not_recover_or_retry_an_ambiguous_prompt_failure
+    client = OrderedClient.new(prompt_error: Net::ReadTimeout.new("prompt timed out"))
+    message = FakeMessage.new
+    results = []
+
+    build_turn(client:, message:, results:).call
+
+    assert_equal 1, client.prompt_count
+    assert_equal 1, client.message_reads
+    assert_nil message.finalized
+    assert_equal Opencode::Turn::ERROR_FALLBACK_CONTENT, message.error_content
+    assert results.last.failed?
+    assert_instance_of Net::ReadTimeout, results.last.error
+  end
+
+  private
+
+  def build_turn(client:, message:, results:)
+    Opencode::Turn.new(
+      message: message,
+      subject: FakeSubject.new(id: 34, opencode_session_id: SESSION_ID),
+      query_text: "ping",
+      client: client,
+      session_for: FakeSession.new,
+      observer_factory: ->(_message) { FakeObserver.new },
+      system_context: ->(_subject) { "test-system" },
+      agent_name: ->(_subject) { "test-agent" },
+      tracer: ->(_name, **_payload) {},
+      on_turn_finished: ->(result) { results << result },
+      empty_stream_retry_delay: 0,
+      final_exchange_timeout: 0,
+      final_exchange_retry_delay: 0
+    )
   end
 end
