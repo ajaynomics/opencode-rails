@@ -29,6 +29,10 @@ bundle install
 
 Runtime deps: `activerecord`, `activestorage`, `activesupport` (>= 7.1). Depends on `opencode-ruby` for the underlying HTTP/SSE primitives.
 
+During the alpha series both gems are pinned in lockstep. Version 0.0.1.alpha6
+uses a subscribe-ready-before-prompt transport contract and reconnects an
+accepted turn without posting its prompt again.
+
 ## Quickstart
 
 ```ruby
