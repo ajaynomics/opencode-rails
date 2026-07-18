@@ -36,23 +36,25 @@ class Opencode::LoadingTest < Minitest::Test
     end
   end
 
-  # We check via path match on both directory ("/opencode-rails/") and
-  # installed-gem name ("/opencode-rails-VERSION/") so the assertion is
-  # robust to either a sibling-repo dev setup or a bundle-resolved gem
-  # install.
-  GEM_PATH_PATTERN = ->(name) { %r{/#{Regexp.escape(name)}[-/]} }
+  # Match the gem's own lib path, not merely any parent directory. GitHub's
+  # checkout layout nests Bundler under /opencode-rails/opencode-rails, so a
+  # broad directory-name assertion falsely classifies a bundled
+  # opencode-ruby source path as belonging to this gem.
+  GEM_SOURCE_PATTERN = lambda do |name, file|
+    %r{/#{Regexp.escape(name)}(?:-[^/]+)?/lib/opencode/#{Regexp.escape(file)}\.rb\z}
+  end
 
   def test_session_constant_points_at_this_gem
     location = Opencode::Session.instance_method(:initialize).source_location.first
-    assert_match GEM_PATH_PATTERN.call("opencode-rails"), location,
+    assert_match GEM_SOURCE_PATTERN.call("opencode-rails", "session"), location,
       "Expected Opencode::Session to be loaded from opencode-rails, got: #{location}"
   end
 
   def test_client_constant_points_at_opencode_ruby
     location = Opencode::Client.instance_method(:initialize).source_location.first
-    assert_match GEM_PATH_PATTERN.call("opencode-ruby"), location,
+    assert_match GEM_SOURCE_PATTERN.call("opencode-ruby", "client"), location,
       "Expected Opencode::Client to come from opencode-ruby, got: #{location}"
-    refute_match GEM_PATH_PATTERN.call("opencode-rails"), location,
+    refute_match GEM_SOURCE_PATTERN.call("opencode-rails", "client"), location,
       "Opencode::Client must NOT come from opencode-rails (it's an opencode-ruby class)"
   end
 
