@@ -213,12 +213,6 @@ module Opencode
       emit_session_created_if_new
       validate_session!(session_id)
 
-      @client.send_message_async(
-        session_id, @query_text,
-        agent: @agent_name.call(@subject),
-        system: @system_context.call(@subject)
-      )
-
       stream_result = stream_response(session_id)
       exchange = fetch_current_exchange(session_id)
       stream_result, exchange = wait_for_final_exchange_result(session_id, stream_result, exchange)
@@ -260,6 +254,22 @@ module Opencode
       last_activity_touch_at = stream_started_at
       first_token_at = nil
       event_count = 0
+      prompt_attempted = false
+      prompt_succeeded = false
+      on_subscribed = lambda do
+        # stream_events guarantees at-most-once invocation, but keep this
+        # guard here as a second line of defense because an ambiguous prompt
+        # response must never become a duplicate model turn.
+        next false if prompt_attempted
+
+        prompt_attempted = true
+        @client.send_message_async(
+          session_id, @query_text,
+          agent: @agent_name.call(@subject),
+          system: @system_context.call(@subject)
+        )
+        prompt_succeeded = true
+      end
 
       begin
         release_active_record_connections
@@ -293,7 +303,8 @@ module Opencode
         @client.stream_events(
           session_id: session_id,
           reply: reply,
-          on_activity_tick: activity_tick
+          on_activity_tick: activity_tick,
+          on_subscribed: on_subscribed
         ) do |event|
           event_count += 1
           reply.apply(event)
@@ -308,6 +319,13 @@ module Opencode
       rescue Opencode::SessionNotFoundError
         raise
       rescue StandardError => e
+        # Subscription rejection or prompt transport failure happened before
+        # a turn was confirmed started. Recovering from the pre-turn exchange
+        # could finalize stale text, and retrying an ambiguous POST could
+        # duplicate spend, so surface the original failure to the outer error
+        # path without reconnect/recovery.
+        raise unless prompt_succeeded
+
         Opencode::ErrorReporter.report(e, handled: true, severity: :warning,
           context: { feature: @error_feature, error_class: e.class.name })
         emit("stream.interrupted",

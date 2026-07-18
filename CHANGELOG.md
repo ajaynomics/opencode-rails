@@ -1,13 +1,31 @@
 # Changelog
 
+## 0.0.1.alpha7 - 2026-07-18
+
+### Fixed
+
+- Make `Opencode::Turn` submit `prompt_async` through the transport's
+  at-most-once `on_subscribed` callback, after `server.connected` proves the
+  SSE listener is ready. Reconnects reopen only SSE and never replay the user
+  prompt.
+- Fail the turn directly when subscription setup or the prompt POST fails
+  before a turn is confirmed started. The recovery path no longer risks
+  finalizing stale exchange text after a pre-turn failure.
+- Add a gem-level behavioral regression for the cross-gem ordering contract,
+  including reconnect and ambiguous prompt timeout cases.
+
+### Bumped
+
+- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha7`.
+
 ## 0.0.1.alpha6 - 2026-07-18
 
 ### Bumped
 
-- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha6`. Rails turns
-  now establish and validate the OpenCode SSE subscription before submitting
-  `prompt_async`, and automatic SSE reconnects reopen only the subscription
-  without replaying the user prompt.
+- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha6`. This exposed
+  subscribe-before-prompt through `Client#stream`, but the lower-level
+  `Opencode::Turn` path still sent before `stream_events`; that orchestration
+  gap is fixed in alpha7.
 
 ## 0.0.1.alpha5 - 2026-07-15
 
