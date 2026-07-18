@@ -31,7 +31,7 @@ jobs:
       - name: Verify gem loads after install
         run: |
           client_dir="$(bundle show opencode-ruby)"
-          gem build "$client_dir/opencode-ruby.gemspec"
-          gem install opencode-ruby-*.gem --no-document
+          (cd "$client_dir" && gem build opencode-ruby.gemspec)
+          gem install "$client_dir"/opencode-ruby-*.gem --no-document
           gem install opencode-rails-*.gem --no-document
           ruby -ropencode-rails -e 'puts Opencode::RAILS_VERSION'
