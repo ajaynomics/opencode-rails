@@ -19,8 +19,13 @@ Production-grade [OpenCode](https://opencode.ai) integration for Rails apps. Lay
 
 ```ruby
 # Gemfile
-gem "opencode-ruby"   # wire client + Reply state machine
-gem "opencode-rails"  # AR-coupled session/turn/artifact stack
+gem "opencode-ruby", "= 0.0.1.alpha7" # wire client + Reply state machine
+
+# v0.0.1.alpha7 is a GitHub source release, not a RubyGems release. Pin the
+# peeled release commit so a moved tag cannot change the code Bundler installs.
+gem "opencode-rails",
+  git: "https://github.com/ajaynomics/opencode-rails.git",
+  ref: "2a391ccad1d098e4bb51eb19b6ca52adaa79e5cb"
 ```
 
 ```bash
@@ -33,9 +38,12 @@ During the alpha series both gems are pinned in lockstep. Version 0.0.1.alpha7
 uses a subscribe-ready-before-prompt transport contract and reconnects an
 accepted turn without posting its prompt again.
 
-Releases use RubyGems trusted publishing. Register `release.yml` as the gem's
-trusted publisher (using the `release` environment); after that, a `v*` tag
-publishes without a long-lived RubyGems API key.
+`opencode-rails` 0.0.1.alpha7 is available as a GitHub source release but has
+not been published to RubyGems. The `release.yml` workflow is prepared for
+RubyGems trusted publishing, but the gem's trusted publisher still has to be
+registered for that workflow and its `release` environment. Until then, pushing
+a `v*` tag does not make the gem installable from RubyGems; use the exact Git
+commit above. Trusted publishing does not require a long-lived RubyGems API key.
 
 ## Quickstart
 
@@ -50,12 +58,28 @@ Opencode::ErrorReporter.adapter = ->(error, **opts) {
 ```
 
 ```ruby
+# app/services/noop_reply_observer.rb
+#
+# Turn requires an observer factory even when the app does not need live
+# partial rendering. For a streaming UI, replace this with an observer that
+# persists/broadcasts selected ReplyObserver callbacks (and throttle writes).
+class NoopReplyObserver
+  include Opencode::ReplyObserver
+
+  def watch(reply)
+    reply.add_observer(self)
+    self
+  end
+end
+```
+
+```ruby
 # app/jobs/generate_response_job.rb
 class GenerateResponseJob < ApplicationJob
   def perform(assistant_message)
     conversation = assistant_message.conversation
     user_message = conversation.messages.where(role: :user).last
-    client       = Opencode::Client.new(base_url: ENV["OPENCODE_URL"])
+    client       = Opencode::Client.new(base_url: ENV.fetch("OPENCODE_URL"))
 
     session = Opencode::Session.new(
       conversation,
@@ -68,9 +92,15 @@ class GenerateResponseJob < ApplicationJob
       subject:        conversation,
       query_text:     user_message.content,
       client:         client,
-      session:        session,
+      session_for:    session,
+      observer_factory: ->(_message) { NoopReplyObserver.new },
+      system_context: ->(record) { "You are assisting with #{record.title}." },
+      agent_name:     ->(_record) { ENV.fetch("OPENCODE_AGENT", "build") },
+      tracer:         ->(name, **payload) {
+        ActiveSupport::Notifications.instrument("assistant.#{name}", payload)
+      },
       on_turn_finished: ->(result) {
-        # result.status   #=> :completed | :error | :cancelled
+        # result.status   #=> :completed | :cancelled | :error | :failed
         # result.message  #=> the AR row (reloaded)
         # result.duration_ms
       }
@@ -87,7 +117,16 @@ class GenerateResponseJob < ApplicationJob
 end
 ```
 
-The host's record (here `conversation`) must respond to `#title`, `#opencode_session_id`, `#opencode_session_id=`, `#with_lock(&block)`, `#update!`, `#reload`, `#id`. The host's message record (here `assistant_message`) must respond to `#error!(content)`, `#update_columns(...)`, `#with_lock(&block)`, `#reload`, `#pending?`.
+The host record (here `conversation`) must respond to `#title`,
+`#opencode_session_id`, `#opencode_session_id=`, `#with_lock(&block)`,
+`#update!`, `#reload`, and `#id`. The assistant message must respond to `#id`,
+`#reload`, `#cancelled?`, `#finalize!(**attrs)`, `#update!(**attrs)`, and
+`#error!(content)`. A non-no-op observer may impose additional record methods
+for its own live snapshots.
+
+`Opencode::Turn` is an internal, alpha-stage composition seam. Its keyword
+constructor is intentionally explicit and may change before 1.0, so keep this
+wiring in one host service/job and keep the gem source pinned exactly.
 
 ## What you get
 
