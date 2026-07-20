@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.1.alpha8 - 2026-07-20
+
+### Bumped
+
+- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha8`, carrying the
+  hardened SSE framing parser while retaining the alpha7 subscribe-before-
+  prompt and at-most-once reconnect contract.
+
+### Changed
+
+- Test the supported runtime surface on Ruby 3.2, 3.3, 3.4, and 4.0.
+- Pin every third-party CI and release action to an exact reviewed commit and
+  use Ruby 4.0 for release builds.
+- Fail the trusted-publishing job before release when the pushed tag does not
+  match `Opencode::RAILS_VERSION`.
+
 ## 0.0.1.alpha7 - 2026-07-18
 
 ### Fixed

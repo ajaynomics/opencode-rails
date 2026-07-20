@@ -5,6 +5,7 @@ require "ripper"
 
 class ReadmeTest < Minitest::Test
   README_PATH = File.expand_path("../README.md", __dir__)
+  GEMFILE_PATH = File.expand_path("../Gemfile", __dir__)
 
   def setup
     @readme = File.read(README_PATH)
@@ -35,5 +36,18 @@ class ReadmeTest < Minitest::Test
     ruby_fences.each_with_index do |source, index|
       assert Ripper.sexp(source), "README Ruby fence #{index + 1} has invalid syntax"
     end
+  end
+
+  def test_install_contract_tracks_candidate_versions_and_client_source
+    gemfile = File.read(GEMFILE_PATH)
+    client_ref = gemfile[/gem "opencode-ruby".*?ref:\s*"([0-9a-f]{40})"/m, 1]
+
+    refute_nil client_ref, "Gemfile must pin opencode-ruby to an exact commit"
+    assert_includes @readme, %(gem "opencode-ruby", "= #{Opencode::VERSION}")
+    assert_includes @readme, %(gem "opencode-rails", "= #{Opencode::RAILS_VERSION}")
+    assert_includes @readme, %(ref: "#{client_ref}")
+    assert_includes @readme,
+      "`opencode-rails` #{Opencode::RAILS_VERSION} is a release candidate"
+    assert_includes @readme, "pushing a `v*` tag does not guarantee publication"
   end
 end

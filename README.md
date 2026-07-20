@@ -17,15 +17,25 @@ Production-grade [OpenCode](https://opencode.ai) integration for Rails apps. Lay
 
 ## Install
 
+After both alpha8 gems are confirmed on RubyGems, pin the lockstep tuple:
+
 ```ruby
 # Gemfile
-gem "opencode-ruby", "= 0.0.1.alpha7" # wire client + Reply state machine
+gem "opencode-ruby", "= 0.0.1.alpha8" # wire client + Reply state machine
+gem "opencode-rails", "= 0.0.1.alpha8"
+```
 
-# v0.0.1.alpha7 is a GitHub source release, not a RubyGems release. Pin the
-# peeled release commit so a moved tag cannot change the code Bundler installs.
+Until publication is verified, validate this candidate checkout against the
+exact `opencode-ruby` source it was tested with:
+
+```ruby
+# Gemfile
+gem "opencode-ruby",
+  git: "https://github.com/ajaynomics/opencode-ruby.git",
+  ref: "9277646a4bb2cf25a8384ffc140b154f49ea5766"
+
 gem "opencode-rails",
-  git: "https://github.com/ajaynomics/opencode-rails.git",
-  ref: "2a391ccad1d098e4bb51eb19b6ca52adaa79e5cb"
+  path: "../opencode-rails"
 ```
 
 ```bash
@@ -34,16 +44,16 @@ bundle install
 
 Runtime deps: `activerecord`, `activestorage`, `activesupport` (>= 7.1). Depends on `opencode-ruby` for the underlying HTTP/SSE primitives.
 
-During the alpha series both gems are pinned in lockstep. Version 0.0.1.alpha7
-uses a subscribe-ready-before-prompt transport contract and reconnects an
-accepted turn without posting its prompt again.
+During the alpha series both gems are pinned in lockstep. Version 0.0.1.alpha8
+retains the subscribe-ready-before-prompt transport contract and reconnects an
+accepted turn without posting its prompt again, while hardening SSE framing.
 
-`opencode-rails` 0.0.1.alpha7 is available as a GitHub source release but has
-not been published to RubyGems. The `release.yml` workflow is prepared for
-RubyGems trusted publishing, but the gem's trusted publisher still has to be
-registered for that workflow and its `release` environment. Until then, pushing
-a `v*` tag does not make the gem installable from RubyGems; use the exact Git
-commit above. Trusted publishing does not require a long-lived RubyGems API key.
+`opencode-rails` 0.0.1.alpha8 is a release candidate and is not yet confirmed
+published on RubyGems. The `release.yml` workflow is prepared for RubyGems
+trusted publishing, but the gem's trusted publisher must be registered and
+verified for that workflow and its `release` environment. Until the registry
+result is verified, pushing a `v*` tag does not guarantee publication. Trusted
+publishing does not require a long-lived RubyGems API key.
 
 ## Quickstart
 
