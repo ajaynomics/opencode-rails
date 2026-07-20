@@ -50,4 +50,23 @@ class ReadmeTest < Minitest::Test
       "`opencode-rails` #{Opencode::RAILS_VERSION} is a release candidate"
     assert_includes @readme, "pushing a `v*` tag does not guarantee publication"
   end
+
+  def test_quickstart_uses_current_fail_closed_permission_rules
+    refute_match(/\{\s*type:/, @quickstart)
+    assert_includes @quickstart, '{ permission: "bash", pattern: "*", action: "deny" }'
+    assert_includes @quickstart, '{ permission: "external_directory", pattern: "*", action: "deny" }'
+    assert_includes @quickstart, '{ permission: "edit", pattern: "*", action: "deny" }'
+    assert_includes @quickstart, 'permission: "edit",'
+    assert_includes @quickstart, 'action: "allow"'
+  end
+
+  def test_quickstart_uses_the_enqueued_user_message
+    assert_includes @quickstart, "def perform(assistant_message, user_message)"
+    refute_includes @quickstart, ".where(role: :user).last"
+  end
+
+  def test_instrumentation_docs_match_the_configured_tracer_prefix
+    assert_includes @readme, "`assistant.response.started`"
+    assert_includes @readme, "Turn events flow through the injected tracer"
+  end
 end

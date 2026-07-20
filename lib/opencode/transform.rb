@@ -31,7 +31,8 @@ module Opencode
   #   trusted?(attachment)  — true if the attachment was produced by
   #                           this transform (used by Impostor.for and
   #                           by view code that decides inline-render
-  #                           vs download). Default: filename match.
+  #                           vs download). Default: false; subclasses
+  #                           must verify host-authored metadata.
   #   purge_impostors?      — if true, before attaching the substrate
   #                           deletes any existing attachment whose
   #                           filename matches destination_filename
@@ -60,8 +61,8 @@ module Opencode
       raise NotImplementedError, "#{self.class.name} must implement #render"
     end
 
-    def trusted?(attachment)
-      attachment.filename.to_s == destination_filename
+    def trusted?(_attachment)
+      false
     end
 
     def purge_impostors?

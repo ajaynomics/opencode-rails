@@ -38,6 +38,7 @@ Gem::Specification.new do |spec|
   # exactly (= not ~>) so that consumers always pick the version this gem
   # was tested against.
   spec.add_runtime_dependency "opencode-ruby", "= 0.0.1.alpha8"
+  spec.add_runtime_dependency "marcel", "~> 1.0"
 
   # Rails sub-libraries used at runtime. Depending on these individually
   # (instead of the `rails` umbrella) avoids forcing host apps to load

@@ -29,7 +29,7 @@ class Opencode::TransformTest < Minitest::Test
   end
 
   # A trivial concrete subclass exercises the defaults that DO exist
-  # (#applies_to?, #trusted?, #owned_filenames all delegate to the
+  # (#applies_to? and #owned_filenames delegate to the
   # two abstract filename methods).
   class FakeTransform < Opencode::Transform
     def source_filename = "agent-output.json"
@@ -48,13 +48,11 @@ class Opencode::TransformTest < Minitest::Test
     refute transform.applies_to?(other)
   end
 
-  def test_trusted_matches_destination_filename_by_default
+  def test_trusted_fails_closed_by_default
     transform = FakeTransform.new
-    trusted   = Attachment.new(filename: "rendered.html")
-    untrusted = Attachment.new(filename: "agent-output.json")
+    destination = Attachment.new(filename: "rendered.html")
 
-    assert transform.trusted?(trusted)
-    refute transform.trusted?(untrusted)
+    refute transform.trusted?(destination)
   end
 
   def test_owned_filenames_is_source_and_destination

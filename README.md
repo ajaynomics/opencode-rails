@@ -32,7 +32,7 @@ exact `opencode-ruby` source it was tested with:
 # Gemfile
 gem "opencode-ruby",
   git: "https://github.com/ajaynomics/opencode-ruby.git",
-  ref: "9277646a4bb2cf25a8384ffc140b154f49ea5766"
+  ref: "49a161632e6631d3605af5170de00c4688cfcedb"
 
 gem "opencode-rails",
   path: "../opencode-rails"
@@ -42,7 +42,13 @@ gem "opencode-rails",
 bundle install
 ```
 
-Runtime deps: `activerecord`, `activestorage`, `activesupport` (>= 7.1). Depends on `opencode-ruby` for the underlying HTTP/SSE primitives.
+Runtime deps: `activerecord`, `activestorage`, `activesupport` (>= 7.1), and
+`marcel`. Depends on `opencode-ruby` for the underlying HTTP/SSE primitives.
+
+`UploadedFilesPrompt` anchors upload writes through `/proc/self/fd` or
+`/dev/fd` to prevent sandbox-root path swaps. Hosts using upload copying must
+provide one of those traversable descriptor filesystems; unsupported platforms
+fail closed before writing.
 
 During the alpha series both gems are pinned in lockstep. Version 0.0.1.alpha8
 retains the subscribe-ready-before-prompt transport contract and reconnects an
@@ -86,9 +92,11 @@ end
 ```ruby
 # app/jobs/generate_response_job.rb
 class GenerateResponseJob < ApplicationJob
-  def perform(assistant_message)
+  def perform(assistant_message, user_message)
     conversation = assistant_message.conversation
-    user_message = conversation.messages.where(role: :user).last
+    unless user_message.conversation_id == conversation.id
+      raise ArgumentError, "User and assistant messages must belong to the same conversation"
+    end
     client       = Opencode::Client.new(base_url: ENV.fetch("OPENCODE_URL"))
 
     session = Opencode::Session.new(
@@ -121,7 +129,14 @@ class GenerateResponseJob < ApplicationJob
 
   def permission_rules_for(conversation)
     [
-      { type: "edit", action: "allow", path: "data/sandbox/#{conversation.id}/" }
+      { permission: "bash", pattern: "*", action: "deny" },
+      { permission: "external_directory", pattern: "*", action: "deny" },
+      { permission: "edit", pattern: "*", action: "deny" },
+      {
+        permission: "edit",
+        pattern: "data/sandbox/#{conversation.id}/**",
+        action: "allow"
+      }
     ]
   end
 end
@@ -159,17 +174,18 @@ Plus everything from `opencode-ruby`: `Client`, `Reply`, `ReplyObserver`, `Trace
 
 ## Instrumentation + error reporting
 
-The gem emits events through `Opencode::Instrumentation.instrument(name, payload, &blk)` and reports swallowed errors through `Opencode::ErrorReporter.report(error, **opts)`. Both are no-ops by default. Wire your host's emitter / reporter in an initializer (see Quickstart above).
+The wire client emits `opencode.request` and artifact extraction emits
+`opencode.apply_patch.artifacts_dropped` through `Opencode::Instrumentation`.
+Turn events flow through the injected tracer; with the Quickstart's
+`assistant.` prefix they include:
 
-Events emitted (non-exhaustive):
+- `assistant.response.started`, `assistant.turn.finished`
+- `assistant.stream.completed`, `assistant.stream.interrupted`
+- `assistant.session.created`, `assistant.session.recreated_with_resend`
+- `assistant.response.upstream_error`
 
-- `opencode.turn.started`, `opencode.turn.finished`
-- `opencode.stream.completed`, `opencode.stream.interrupted`
-- `opencode.session.created`, `opencode.session.recreated`
-- `opencode.apply_patch.artifacts_dropped`
-- `opencode.response.upstream_error`
-
-Subscribe via `ActiveSupport::Notifications.subscribe("opencode.*")` once you've wired the adapter.
+Swallowed errors flow through `Opencode::ErrorReporter.report(error, **opts)`.
+Instrumentation and error reporting are no-ops until the host wires adapters.
 
 ## Position
 

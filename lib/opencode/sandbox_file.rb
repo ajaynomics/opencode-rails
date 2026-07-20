@@ -15,6 +15,8 @@ module Opencode
   # not here — the file doesn't know which turn opened "after." That's
   # a property of the scan, not a property of the file.
   class SandboxFile
+    UnsafeFileError = Class.new(Opencode::Error)
+
     attr_reader :path, :sandbox_prefix
 
     def initialize(path:, sandbox_prefix:, max_bytes:)
@@ -36,7 +38,13 @@ module Opencode
     end
 
     def content
-      File.read(path)
+      with_safe_file do |file|
+        content = file.read(@max_bytes + 1) || "".b
+        if content.bytesize > @max_bytes
+          raise UnsafeFileError, "Sandbox file exceeds size limit while reading: #{basename}"
+        end
+        content
+      end
     end
 
     def content_type
@@ -52,17 +60,11 @@ module Opencode
     #   - Reject anything over the size cap (default
     #     Opencode::ResponseParser::MAX_ARTIFACT_SIZE = 10 MB).
     #
-    # The Sandbox scan filters non-files (directories, FIFOs) before
-    # yielding, so we don't re-check #file? here.
+    # Revalidates the opened file descriptor so a path swap between the
+    # sandbox scan and the read cannot redirect content outside the sandbox.
     def safe?
-      return false if File.symlink?(path)
-      return false unless Pathname.new(path).realpath.to_s.start_with?(sandbox_prefix)
-      return false if size > @max_bytes
-
-      true
-    rescue Errno::ENOENT
-      # Concurrent deletion between scan-yield and safety-check — treat
-      # as unsafe so the orchestrator skips rather than crashing.
+      with_safe_file { true }
+    rescue UnsafeFileError
       false
     end
 
@@ -76,6 +78,32 @@ module Opencode
         content:      content,
         content_type: content_type
       )
+    end
+
+    private
+
+    def with_safe_file
+      before = File.lstat(path)
+      raise UnsafeFileError, "Unsafe sandbox file: #{basename}" unless before.file? && !before.symlink?
+
+      resolved = Pathname.new(path).realpath.to_s
+      unless resolved.start_with?(sandbox_prefix)
+        raise UnsafeFileError, "Sandbox file escapes its root: #{basename}"
+      end
+
+      File.open(path, "rb") do |file|
+        opened = file.stat
+        unless opened.file? && opened.dev == before.dev && opened.ino == before.ino
+          raise UnsafeFileError, "Sandbox file changed while opening: #{basename}"
+        end
+        if opened.size > @max_bytes
+          raise UnsafeFileError, "Sandbox file exceeds size limit: #{basename}"
+        end
+
+        yield file
+      end
+    rescue Errno::ENOENT, Errno::ELOOP => e
+      raise UnsafeFileError, "Unsafe sandbox file #{basename}: #{e.message}"
     end
   end
 end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "open3"
 
 # Smoke test: every constant the gem promises is defined and points at
 # the right kind of object. If require "opencode-rails" loads cleanly,
@@ -46,8 +47,9 @@ class Opencode::LoadingTest < Minitest::Test
 
   def test_session_constant_points_at_this_gem
     location = Opencode::Session.instance_method(:initialize).source_location.first
-    assert_match GEM_SOURCE_PATTERN.call("opencode-rails", "session"), location,
-      "Expected Opencode::Session to be loaded from opencode-rails, got: #{location}"
+    expected = File.expand_path("../../lib/opencode/session.rb", __dir__)
+    assert_equal expected, File.expand_path(location),
+      "Expected Opencode::Session to be loaded from this opencode-rails checkout"
   end
 
   def test_client_constant_points_at_opencode_ruby
@@ -70,5 +72,25 @@ class Opencode::LoadingTest < Minitest::Test
     # Opencode::RAILS_VERSION, not Opencode::Rails::VERSION.
     refute Opencode.const_defined?(:Rails),
       "Opencode::Rails must not be defined — it would shadow ::Rails inside the Opencode namespace"
+  end
+
+  def test_umbrella_require_loads_runtime_standard_libraries
+    root = File.expand_path("../..", __dir__)
+    script = <<~'RUBY'
+      require "opencode-rails"
+      abort "StringIO missing" unless defined?(StringIO)
+      abort "Marcel missing" unless defined?(Marcel::MimeType)
+      abort "FileUtils missing" unless defined?(FileUtils)
+      abort "Tempfile missing" unless defined?(Tempfile)
+    RUBY
+
+    _stdout, stderr, status = Open3.capture3(
+      Gem.ruby,
+      "-I#{File.join(root, "lib")}",
+      "-e",
+      script
+    )
+
+    assert status.success?, stderr
   end
 end

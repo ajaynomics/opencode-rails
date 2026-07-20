@@ -80,6 +80,10 @@ module Opencode
 
         if (transform = transforms.find { |t| t.applies_to?(file) })
           attached += 1 if apply_transform(transform, file)
+        elsif transform_owned_filenames.include?(file.basename)
+          # Destination names belong exclusively to their host transform.
+          # Agent-authored bytes must never fall through as trusted output.
+          next
         elsif default_attach == :all
           # Default identity path: every safe sandbox file that no
           # transform claims attaches as-is. Callers that want the

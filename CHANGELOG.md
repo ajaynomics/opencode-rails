@@ -8,6 +8,18 @@
   hardened SSE framing parser while retaining the alpha7 subscribe-before-
   prompt and at-most-once reconnect contract.
 
+### Fixed
+
+- Keep transform destination filenames out of the agent-authored identity
+  attachment path and require transforms to verify trust explicitly.
+- Anchor uploads to an opened sandbox directory across path swaps, replace
+  destination symlinks without following them, and validate bounded reads from
+  the opened sandbox file. Upload copying now requires a traversable
+  `/proc/self/fd` or `/dev/fd` descriptor filesystem and fails closed without it.
+- Load every runtime standard library explicitly and align the shipped
+  permissions, observer, Turn, prompt, and instrumentation examples with the
+  actual APIs.
+
 ### Changed
 
 - Test the supported runtime surface on Ruby 3.2, 3.3, 3.4, and 4.0.

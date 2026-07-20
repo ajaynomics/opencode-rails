@@ -27,8 +27,7 @@
 #   3. ReplyObserver: bridge Reply state to Turbo Stream broadcasts.
 #   4. Permissions builder: per-product session permission rules.
 #
-# Tested patterns. Every line below has been exercised in production.
-# Copy what you need; adapt to your domain.
+# Contract-tested reference. Copy what you need and adapt it to your domain.
 
 # ----------------------------------------------------------------------
 # 1. config/initializers/opencode.rb
@@ -39,10 +38,8 @@
 # events to its observability stack.
 
 Rails.application.config.to_prepare do
-  # opencode-ruby: every HTTP request, SSE event lifecycle, recovery
-  # path flows through this adapter as an ActiveSupport::Notifications
-  # event. Subscribers in this app pick it up via
-  # `ActiveSupport::Notifications.subscribe("opencode.*", ...)`.
+  # opencode-ruby HTTP requests flow through this adapter as
+  # `opencode.request` ActiveSupport::Notifications events.
   Opencode::Instrumentation.adapter = ->(name, payload, &block) {
     ActiveSupport::Notifications.instrument(name, payload, &block)
   }
@@ -70,13 +67,15 @@ class GenerateResponseJob < ApplicationJob
   # SolidQueue concurrency_key — only one turn per conversation in
   # flight at a time. Without this, a user sending two messages back-
   # to-back can race two turns through the same OpenCode session.
-  limits_concurrency to: 1, key: ->(message) { "GenerateResponseJob/#{message.conversation_id}" }
+  limits_concurrency to: 1, key: ->(message, _user_message) { "GenerateResponseJob/#{message.conversation_id}" }
 
-  def perform(assistant_message)
+  def perform(assistant_message, user_message)
     return if assistant_message.terminal?  # idempotent
 
     conversation = assistant_message.conversation
-    user_message = conversation.messages.where(role: :user).order(:created_at).last
+    unless user_message.conversation_id == conversation.id
+      raise ArgumentError, "User and assistant messages must belong to the same conversation"
+    end
     client       = Opencode::Client.new(base_url: ENV.fetch("OPENCODE_URL"))
 
     # Session: AR-coupled, row-locked, idempotent. ensure! creates the
@@ -96,11 +95,13 @@ class GenerateResponseJob < ApplicationJob
       subject:        conversation,
       query_text:     user_message.content,
       client:         client,
-      session_for:    ->(*) { session },
+      session_for:    session,
       observer_factory: ->(message) { ReplyStream.new(message: message) },
-      system_context: build_system_context(conversation),
-      agent_name:     "default",
-      tracer:         Opencode::Tracer.new(prefix: "opencode."),
+      system_context: ->(record) { build_system_context(record) },
+      agent_name:     ->(_record) { "build" },
+      tracer:         ->(name, **payload) {
+        ActiveSupport::Notifications.instrument("assistant.#{name}", payload)
+      },
       on_turn_finished: ->(result) {
         Rails.logger.info("turn finished status=#{result.status} cost=#{result.cost}")
       }
@@ -117,19 +118,25 @@ class GenerateResponseJob < ApplicationJob
     # Per-product permissions. The shape mirrors what
     # opencode-ruby's Client#create_session expects in `permissions:`.
     [
-      { type: "edit", action: "allow", path: "data/sandbox/#{conversation.id}/" },
-      { type: "edit", action: "deny",  path: "*" }  # default deny outside sandbox
+      { permission: "bash", pattern: "*", action: "deny" },
+      { permission: "external_directory", pattern: "*", action: "deny" },
+      { permission: "edit", pattern: "*", action: "deny" },
+      {
+        permission: "edit",
+        pattern: "data/sandbox/#{conversation.id}/**",
+        action: "allow"
+      }
     ]
   end
 
   def build_system_context(conversation)
     # System prompt context the agent gets. Your app probably already
     # has helpers for this; the gem doesn't impose a shape.
-    {
-      user_name:        conversation.user.name,
-      conversation_id:  conversation.id,
-      sandbox_path:     "/sandbox/#{conversation.id}"
-    }
+    <<~CONTEXT
+      User: #{conversation.user.name}
+      Conversation: #{conversation.id}
+      Sandbox: /sandbox/#{conversation.id}
+    CONTEXT
   end
 end
 
@@ -138,7 +145,7 @@ end
 # ----------------------------------------------------------------------
 #
 # An Opencode::ReplyObserver implementation that bridges the gem's
-# state-machine callbacks (part_appended, part_updated, finalized) to
+# state-machine callbacks (part_added, part_changed, part_finalized) to
 # Turbo Stream broadcasts. The gem ships the protocol; the host owns
 # the rendering.
 #
@@ -147,51 +154,47 @@ end
 # build_system_context above.
 
 class ReplyStream
+  include Opencode::ReplyObserver
+
   def initialize(message:)
     @message = message
     @parts_dom_id = "parts_message_#{message.id}"
   end
 
-  # Called every time a new part shows up in the reply.
-  def on_part_appended(part)
+  def watch(reply)
+    reply.add_observer(self)
+    self
+  end
+
+  def part_added(part:, index:)
     Turbo::StreamsChannel.broadcast_append_to(
       @message.conversation,
       target: @parts_dom_id,
       partial: "messages/part",
-      locals: { part: part, message: @message }
+      locals: { part: part, index: index, message: @message }
     )
   end
 
-  # Called when an existing part's content grows (text/reasoning
-  # deltas, tool state changes).
-  def on_part_updated(part, _index)
+  def part_changed(part:, index:, delta:)
+    broadcast_update(part, index)
+  end
+
+  def part_finalized(part:, index:)
+    broadcast_update(part, index)
+  end
+
+  def tool_progressed(part:, index:, status:, raw:)
+    broadcast_update(part, index)
+  end
+
+  private
+
+  def broadcast_update(part, index)
     Turbo::StreamsChannel.broadcast_update_to(
       @message.conversation,
-      target: "part_#{part['id']}_message_#{@message.id}",
+      target: "part_#{index}_message_#{@message.id}",
       partial: "messages/part",
-      locals: { part: part, message: @message }
-    )
-  end
-
-  # Called when the turn finalizes. Use this to swap "Thinking…"
-  # placeholders, update message status indicators, etc.
-  def on_finalized(reply_result)
-    Turbo::StreamsChannel.broadcast_update_to(
-      @message.conversation,
-      target: "message_#{@message.id}_status",
-      partial: "messages/status",
-      locals: { message: @message, result: reply_result }
-    )
-  end
-
-  # Optional: called when the gem catches an exception mid-stream and
-  # has done its own recovery (recreated session, retried, etc.). Use
-  # this for a brief transient banner in the UI.
-  def on_error(message, severity:)
-    Turbo::StreamsChannel.broadcast_replace_to(
-      @message.conversation,
-      target: "message_#{@message.id}_status",
-      html: %(<div class="banner banner--warn">#{message}</div>)
+      locals: { part: part, index: index, message: @message }
     )
   end
 end
@@ -201,9 +204,7 @@ end
 #   - Idempotent session create/resolve with row-level locking
 #   - SSE stream consumption + reconnection on transport hiccups
 #   - SessionNotFoundError / StaleSessionError recovery (recreate + retry)
-#   - Mid-stream parts_json snapshotting via update_columns (bypasses
-#     after_save callbacks; your row-level Turbo broadcasts fire on
-#     YOUR cadence, not every SSE event)
+#   - ReplyObserver callbacks for host-owned live broadcasts or snapshots
 #   - CAS-safe finalize: message reloaded under row lock, transitions
 #     :pending -> :completed only if a concurrent cancel hasn't already
 #     moved it out of :pending.

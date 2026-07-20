@@ -9,6 +9,12 @@
 # rename work.
 
 require "opencode-ruby"
+require "fileutils"
+require "marcel"
+require "pathname"
+require "set"
+require "stringio"
+require "tempfile"
 
 require "active_support/core_ext/object/blank"      # blank?, present?, presence
 require "active_support/core_ext/object/try"

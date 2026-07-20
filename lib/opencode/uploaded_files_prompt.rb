@@ -24,8 +24,10 @@ module Opencode
   # Side effect, unchanged from the concern: file bytes are copied from
   # ActiveStorage into the per-user OpenCode sandbox directory so the
   # agent can read them with the `read` tool. The copy is path-escape
-  # guarded (the cleanpath of the destination must start with the
-  # sandbox dir prefix, no symlink trickery).
+  # guarded: generated names must be basenames, and all writes stay anchored
+  # to an opened directory handle even if the sandbox path is replaced.
+  # A temporary file is renamed into place so destination symlinks are
+  # replaced rather than followed. Retried jobs can refresh existing copies.
   class UploadedFilesPrompt
     attr_reader :text, :sandbox_file_names
 
@@ -52,24 +54,77 @@ module Opencode
       [
         raw,
         "",
-        "The user uploaded #{file_instructions.size} file(s). Read each file thoroughly, then consult your reference materials and verify any legal claims before responding:",
+        "The user uploaded #{file_instructions.size} file(s). Read each file thoroughly before responding:",
         *file_instructions
       ].join("\n").strip
     end
 
     def copy_to_sandbox(file)
-      FileUtils.mkdir_p(@sandbox_path)
+      sandbox_path = Pathname.new(@sandbox_path).expand_path
+      FileUtils.mkdir_p(sandbox_path)
+      sandbox_stat = File.lstat(sandbox_path)
+      unless sandbox_stat.directory? && !sandbox_stat.symlink?
+        raise ArgumentError, "Sandbox root must be a directory, not a symlink: #{sandbox_path}"
+      end
 
-      sandbox_name = @sandbox_name_for.call(file)
-      dest = File.join(@sandbox_path, sandbox_name)
-
-      resolved = Pathname.new(dest).cleanpath.to_s
-      unless resolved.start_with?(@sandbox_path)
+      sandbox_name = @sandbox_name_for.call(file).to_s
+      unless sandbox_name == File.basename(sandbox_name) && !%w[. ..].include?(sandbox_name)
         raise ArgumentError, "Filename escapes sandbox: #{sandbox_name}"
       end
 
-      File.open(dest, "wb") { |f| f.write(file.download) }
-      Placement.new(sandbox_name, dest)
+      File.open(sandbox_path, File::RDONLY) do |directory|
+        opened_stat = directory.stat
+        unless opened_stat.directory? && same_file?(sandbox_stat, opened_stat)
+          raise ArgumentError, "Sandbox root changed while opening: #{sandbox_path}"
+        end
+
+        directory_path = directory_handle_path(directory)
+        dest = File.join(directory_path, sandbox_name)
+        mode = destination_mode(dest)
+
+        Tempfile.create([ ".opencode-upload-", ".tmp" ], directory_path) do |temp|
+          temp.binmode
+          temp.write(file.download)
+          temp.flush
+          temp.chmod(mode)
+          File.rename(temp.path, dest)
+
+          unless same_file_at_path?(sandbox_path, opened_stat)
+            File.unlink(dest)
+            raise ArgumentError, "Sandbox root changed during upload: #{sandbox_path}"
+          end
+        end
+      end
+      Placement.new(sandbox_name, sandbox_path.join(sandbox_name).to_s)
+    end
+
+    def directory_handle_path(directory)
+      stat = directory.stat
+      [ "/proc/self/fd/#{directory.fileno}", "/dev/fd/#{directory.fileno}" ].find do |path|
+        same_file?(File.stat(path), stat)
+      rescue Errno::ENOENT
+        false
+      end || raise(ArgumentError, "Platform cannot anchor writes to the opened sandbox directory")
+    end
+
+    def destination_mode(path)
+      stat = File.lstat(path)
+      return stat.mode & 0o777 if stat.file? && !stat.symlink?
+
+      0o666 & ~File.umask
+    rescue Errno::ENOENT
+      0o666 & ~File.umask
+    end
+
+    def same_file_at_path?(path, expected)
+      current = File.lstat(path)
+      current.directory? == expected.directory? && !current.symlink? && same_file?(current, expected)
+    rescue Errno::ENOENT
+      false
+    end
+
+    def same_file?(left, right)
+      left.dev == right.dev && left.ino == right.ino
     end
 
     # Tiny value pair returned by copy_to_sandbox: the canonical filename
