@@ -17,6 +17,10 @@ class ReleaseWorkflowTest < Minitest::Test
     workflow.fetch("jobs").fetch("push")
   end
 
+  def verify_job
+    workflow.fetch("jobs").fetch("verify")
+  end
+
   def test_release_job_is_inert_on_non_github_runners
     assert_equal "${{ github.server_url == 'https://github.com' }}", push_job.fetch("if")
   end
@@ -32,33 +36,41 @@ class ReleaseWorkflowTest < Minitest::Test
     setup_ruby = steps.find { |step| step["uses"] == SETUP_RUBY_ACTION }
 
     assert_equal "4.0", setup_ruby.dig("with", "ruby-version")
+    assert_equal true, setup_ruby.dig("with", "bundler-cache")
     assert_equal 1, steps.count { |step| step["uses"] == RELEASE_GEM_ACTION }
     assert steps.filter_map { |step| step["uses"] }.all? { |uses| uses.match?(/@[0-9a-f]{40}\z/) }
-    refute steps.any? { |step| step.fetch("run", "").match?(/\bgem\s+push\b/) }
+    refute steps.any? { |step| step.key?("run") }
   end
 
   def test_release_tag_must_match_the_gem_version_before_publish
-    steps = push_job.fetch("steps")
-    preflight_index = steps.index { |step| step["name"] == "Verify tag matches gem version" }
-    publish_index = steps.index { |step| step["uses"] == RELEASE_GEM_ACTION }
+    preflight = verify_job.fetch("steps").find { |step| step["name"] == "Verify tag matches gem version" }
 
-    refute_nil preflight_index
-    refute_nil publish_index
-    assert_operator preflight_index, :<, publish_index
-
-    preflight = steps.fetch(preflight_index)
+    refute_nil preflight
     assert_equal "${{ github.ref_name }}", preflight.dig("env", "RELEASE_TAG")
     assert_includes preflight.fetch("run"), "unless Opencode::RAILS_VERSION == expected"
   end
 
-  def test_release_runs_the_test_suite_before_publish
-    steps = push_job.fetch("steps")
-    test_index = steps.index { |step| step["name"] == "Run tests" }
-    publish_index = steps.index { |step| step["uses"] == RELEASE_GEM_ACTION }
+  def test_verification_job_has_read_only_credentials
+    assert_equal({ "contents" => "read" }, verify_job.fetch("permissions"))
 
-    refute_nil test_index
-    refute_nil publish_index
-    assert_operator test_index, :<, publish_index
-    assert_equal "bundle exec rake test", steps.fetch(test_index).fetch("run")
+    checkout = verify_job.fetch("steps").find { |step| step.fetch("uses", "").start_with?("actions/checkout@") }
+    assert_equal false, checkout.dig("with", "persist-credentials")
+  end
+
+  def test_release_verifies_the_supported_matrix_and_installed_gems_before_publish
+    assert_equal %w[3.2 3.3 3.4 4.0], verify_job.dig("strategy", "matrix", "ruby")
+    assert_equal "verify", push_job.fetch("needs")
+
+    commands = verify_job.fetch("steps").filter_map { |step| step["run"] }.join("\n")
+    assert_includes commands, "bundle exec rake test"
+    assert_includes commands, "gem build opencode-rails.gemspec"
+    assert_includes commands, "bundle exec ruby -e"
+    assert_includes commands, 'GEM_HOME="${RUNNER_TEMP}/opencode-rails-${{ matrix.ruby }}"'
+    assert_includes commands, 'client_gem="$client_dir/opencode-ruby-${client_version}.gem"'
+    assert_includes commands, 'rails_gem="opencode-rails-$(ruby -Ilib -ropencode/rails_version'
+    assert_includes commands, 'gem install --local "$client_gem" --no-document'
+    assert_includes commands, 'gem install --local "$rails_gem" --no-document'
+    assert_includes commands, "Gem.loaded_specs.fetch(name).full_gem_path"
+    assert_includes commands, "ruby -ropencode-rails"
   end
 end

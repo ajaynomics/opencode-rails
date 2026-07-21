@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "fileutils"
+require "socket"
 require "tmpdir"
 require "marcel"  # SandboxFile#content_type uses Marcel::MimeType.for
 
@@ -76,6 +77,34 @@ class Opencode::SandboxFileTest < Minitest::Test
     assert_raises(Opencode::SandboxFile::UnsafeFileError) { file.content }
   end
 
+  def test_safe_rejects_a_hard_link
+    File.unlink(@path)
+    outside = File.join(@outside_dir, "private.txt")
+    File.write(outside, "private")
+    File.link(outside, @path)
+    file = Opencode::SandboxFile.new(
+      path: @path, sandbox_prefix: @sandbox_prefix, max_bytes: 10_000
+    )
+
+    refute file.safe?
+  end
+
+  def test_content_rejects_a_hard_link_added_immediately_before_open
+    file = Opencode::SandboxFile.new(
+      path: @path, sandbox_prefix: @sandbox_prefix, max_bytes: 10_000
+    )
+    outside_link = File.join(@outside_dir, "linked-notes.md")
+    real_open = File.method(:open)
+    link_before_open = lambda do |path, mode, *args, **kwargs, &block|
+      File.link(path, outside_link)
+      real_open.call(path, mode, *args, **kwargs, &block)
+    end
+
+    File.stub(:open, link_before_open) do
+      assert_raises(Opencode::SandboxFile::UnsafeFileError) { file.content }
+    end
+  end
+
   def test_content_rejects_an_inode_that_grows_past_the_cap_while_reading
     file = Opencode::SandboxFile.new(
       path: @path, sandbox_prefix: @sandbox_prefix, max_bytes: 20
@@ -95,6 +124,76 @@ class Opencode::SandboxFileTest < Minitest::Test
 
     File.stub(:open, grow_on_read) do
       assert_raises(Opencode::SandboxFile::UnsafeFileError) { file.content }
+    end
+  end
+
+  def test_content_rejects_a_fifo_swapped_in_immediately_before_open_without_blocking
+    file = Opencode::SandboxFile.new(
+      path: @path, sandbox_prefix: @sandbox_prefix, max_bytes: 10_000
+    )
+    real_open = File.method(:open)
+    swap_before_open = lambda do |path, mode, *args, **kwargs, &block|
+      File.unlink(path)
+      File.mkfifo(path)
+      assert_kind_of Integer, mode
+      assert_operator mode & File::NONBLOCK, :>, 0
+      assert_operator mode & File::NOFOLLOW, :>, 0
+      real_open.call(path, mode, *args, **kwargs, &block)
+    end
+
+    File.stub(:open, swap_before_open) do
+      assert_raises(Opencode::SandboxFile::UnsafeFileError) { file.content }
+    end
+  end
+
+  def test_content_rejects_a_symlink_swapped_in_immediately_before_open
+    file = Opencode::SandboxFile.new(
+      path: @path, sandbox_prefix: @sandbox_prefix, max_bytes: 10_000
+    )
+    outside = File.join(@outside_dir, "private.txt")
+    File.write(outside, "private")
+    real_open = File.method(:open)
+    swap_before_open = lambda do |path, mode, *args, **kwargs, &block|
+      File.unlink(path)
+      File.symlink(outside, path)
+      real_open.call(path, mode, *args, **kwargs, &block)
+    end
+
+    File.stub(:open, swap_before_open) do
+      assert_raises(Opencode::SandboxFile::UnsafeFileError) { file.content }
+    end
+  end
+
+  def test_safe_rejects_a_socket_swapped_in_immediately_before_open
+    file = Opencode::SandboxFile.new(
+      path: @path, sandbox_prefix: @sandbox_prefix, max_bytes: 10_000
+    )
+    real_open = File.method(:open)
+    socket = nil
+    swap_before_open = lambda do |path, mode, *args, **kwargs, &block|
+      File.unlink(path)
+      socket = UNIXServer.new(path)
+      real_open.call(path, mode, *args, **kwargs, &block)
+    end
+
+    File.stub(:open, swap_before_open) do
+      refute file.safe?
+    end
+  ensure
+    socket&.close
+  end
+
+  def test_safe_fails_closed_when_secure_open_flags_are_unavailable
+    file = Opencode::SandboxFile.new(
+      path: @path, sandbox_prefix: @sandbox_prefix, max_bytes: 10_000
+    )
+    real_const_defined = File.method(:const_defined?)
+    const_defined = lambda do |name, inherit = true|
+      name == :NOFOLLOW ? false : real_const_defined.call(name, inherit)
+    end
+
+    File.stub(:const_defined?, const_defined) do
+      refute file.safe?
     end
   end
 

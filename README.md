@@ -17,12 +17,12 @@ Production-grade [OpenCode](https://opencode.ai) integration for Rails apps. Lay
 
 ## Install
 
-After both alpha8 gems are confirmed on RubyGems, pin the lockstep tuple:
+After both alpha9 gems are confirmed on RubyGems, pin the lockstep tuple:
 
 ```ruby
 # Gemfile
-gem "opencode-ruby", "= 0.0.1.alpha8" # wire client + Reply state machine
-gem "opencode-rails", "= 0.0.1.alpha8"
+gem "opencode-ruby", "= 0.0.1.alpha9" # wire client + Reply state machine
+gem "opencode-rails", "= 0.0.1.alpha9"
 ```
 
 Until publication is verified, validate this candidate checkout against the
@@ -32,7 +32,7 @@ exact `opencode-ruby` source it was tested with:
 # Gemfile
 gem "opencode-ruby",
   git: "https://github.com/ajaynomics/opencode-ruby.git",
-  ref: "49a161632e6631d3605af5170de00c4688cfcedb"
+  ref: "65a44ca1502926d533e6b4b6692779fa39740218"
 
 gem "opencode-rails",
   path: "../opencode-rails"
@@ -50,12 +50,15 @@ Runtime deps: `activerecord`, `activestorage`, `activesupport` (>= 7.1), and
 provide one of those traversable descriptor filesystems; unsupported platforms
 fail closed before writing.
 
-During the alpha series both gems are pinned in lockstep. Version 0.0.1.alpha8
+During the alpha series both gems are pinned in lockstep. Version 0.0.1.alpha9
 retains the subscribe-ready-before-prompt transport contract and reconnects an
 accepted turn without posting its prompt again, while hardening SSE framing.
 
-`opencode-rails` 0.0.1.alpha8 is a release candidate and is not yet confirmed
-published on RubyGems. The `release.yml` workflow is prepared for RubyGems
+The unrepaired `opencode-ruby` 0.0.1.alpha8 package was yanked, and
+`opencode-rails` alpha8 was never published.
+`opencode-rails` 0.0.1.alpha9 is a release candidate and is not yet confirmed
+published on RubyGems. The
+`release.yml` workflow is prepared for RubyGems
 trusted publishing, but the gem's trusted publisher must be registered and
 verified for that workflow and its `release` environment. Until the registry
 result is verified, pushing a `v*` tag does not guarantee publication. Trusted
@@ -97,7 +100,11 @@ class GenerateResponseJob < ApplicationJob
     unless user_message.conversation_id == conversation.id
       raise ArgumentError, "User and assistant messages must belong to the same conversation"
     end
-    client       = Opencode::Client.new(base_url: ENV.fetch("OPENCODE_URL"))
+    sandbox_directory = sandbox_directory_for(conversation)
+    client = Opencode::Client.new(
+      base_url: ENV.fetch("OPENCODE_URL"),
+      directory: sandbox_directory.to_s
+    )
 
     session = Opencode::Session.new(
       conversation,
@@ -127,20 +134,53 @@ class GenerateResponseJob < ApplicationJob
 
   private
 
-  def permission_rules_for(conversation)
+  def permission_rules_for(_conversation)
     [
-      { permission: "bash", pattern: "*", action: "deny" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
-      { permission: "edit", pattern: "*", action: "deny" },
-      {
-        permission: "edit",
-        pattern: "data/sandbox/#{conversation.id}/**",
-        action: "allow"
-      }
+      { permission: "*", pattern: "*", action: "deny" }
     ]
+  end
+
+  def sandbox_directory_for(conversation)
+    identifier = conversation.id.to_s
+    unless identifier.match?(/\A[0-9A-Za-z_-]+\z/)
+      raise ArgumentError, "Conversation id is not safe for a directory name"
+    end
+
+    root = Pathname.new(ENV.fetch("OPENCODE_SANDBOX_ROOT")).expand_path
+    root.mkpath
+    root = root.realpath
+    if root.ascend.any? { |directory| directory.join(".git").exist? }
+      raise ArgumentError, "OPENCODE_SANDBOX_ROOT must be outside every Git worktree"
+    end
+
+    directory = root.join(identifier)
+    directory.mkpath
+    stat = directory.lstat
+    unless stat.directory? && !stat.symlink?
+      raise ArgumentError, "Conversation sandbox must be a real directory"
+    end
+
+    resolved = directory.realpath
+    unless resolved.to_s.start_with?("#{root}#{File::SEPARATOR}")
+      raise ArgumentError, "Conversation sandbox escapes its root"
+    end
+    resolved
   end
 end
 ```
+
+`OPENCODE_SANDBOX_ROOT` must be outside every Git worktree and mounted at the
+same absolute path in the OpenCode server. OpenCode treats an entire detected
+worktree as internal, so a directory inside the application repository is not
+an `external_directory` boundary. This quickstart intentionally grants no
+filesystem tools: OpenCode permissions alone are not an OS sandbox. Add
+product-specific allows only when the OpenCode process also has an independent
+container or operating-system boundary around the conversation directory.
+
+`Opencode::Session` applies permissions only when it creates a session. Before
+deploying a directory or permission-policy change, recreate persisted sessions
+with a client scoped to the new directory; an existing session ID does not
+prove that the new policy was applied.
 
 The host record (here `conversation`) must respond to `#title`,
 `#opencode_session_id`, `#opencode_session_id=`, `#with_lock(&block)`,

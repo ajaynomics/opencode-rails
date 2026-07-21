@@ -37,8 +37,35 @@ class ExampleTest < Minitest::Test
 
   def test_example_uses_current_fail_closed_permission_rules
     refute_match(/\{\s*type:/, SOURCE)
-    assert_includes SOURCE, '{ permission: "bash", pattern: "*", action: "deny" }'
-    assert_includes SOURCE, '{ permission: "external_directory", pattern: "*", action: "deny" }'
-    assert_includes SOURCE, '{ permission: "edit", pattern: "*", action: "deny" }'
+    assert_includes SOURCE, 'sandbox_directory = sandbox_directory_for(conversation)'
+    assert_includes SOURCE, 'directory: sandbox_directory.to_s'
+    assert_includes SOURCE, '{ permission: "*", pattern: "*", action: "deny" }'
+    refute_includes SOURCE, 'action: "allow"'
+    assert_includes SOURCE, 'ENV.fetch("OPENCODE_SANDBOX_ROOT")'
+    assert_includes SOURCE, "root = root.realpath"
+    assert_includes SOURCE, 'directory.join(".git").exist?'
+    assert_includes SOURCE, 'identifier.match?(/\A[0-9A-Za-z_-]+\z/)'
+    assert_includes SOURCE, "stat = directory.lstat"
+    assert_includes SOURCE, "Conversation sandbox escapes its root"
+    assert_includes SOURCE, "permissions only when it creates a session"
+    assert_match(/recreate persisted sessions/i, SOURCE)
+    refute_includes SOURCE, 'Sandbox: /sandbox/#{conversation.id}'
+  end
+
+  def test_example_permission_order_denies_every_tool
+    body = SOURCE[/def permission_rules_for\(_conversation\)\n(?<body>.*?)^  end/m, :body]
+    rules = eval(body, binding, PATH)
+    action_for = lambda do |permission, pattern|
+      rules.reverse.find do |rule|
+        (rule.fetch(:permission) == "*" || rule.fetch(:permission) == permission) &&
+          (rule.fetch(:pattern) == "*" || rule.fetch(:pattern) == pattern)
+      end.fetch(:action)
+    end
+
+    assert_equal "deny", action_for.call("read", "arbitrary/worktree/path")
+    assert_equal "deny", action_for.call("edit", "arbitrary/worktree/path")
+    assert_equal "deny", action_for.call("external_directory", "/outside/*")
+    assert_equal "deny", action_for.call("grep", "secret")
+    assert_equal "deny", action_for.call("lsp", "*")
   end
 end

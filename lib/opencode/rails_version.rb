@@ -11,5 +11,5 @@
 # We can't reuse the same constant from a second gem, so we use a
 # distinct, non-namespaced constant.
 module Opencode
-  RAILS_VERSION = "0.0.1.alpha8"
+  RAILS_VERSION = "0.0.1.alpha9"
 end

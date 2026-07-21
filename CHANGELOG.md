@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.0.1.alpha8 - 2026-07-20
+## 0.0.1.alpha9 - 2026-07-20
 
 ### Bumped
 
-- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha8`, carrying the
+- Runtime dependency `opencode-ruby` pinned to `= 0.0.1.alpha9`, carrying the
   hardened SSE framing parser while retaining the alpha7 subscribe-before-
   prompt and at-most-once reconnect contract.
 
@@ -16,17 +16,32 @@
   destination symlinks without following them, and validate bounded reads from
   the opened sandbox file. Upload copying now requires a traversable
   `/proc/self/fd` or `/dev/fd` descriptor filesystem and fails closed without it.
+- Reject hard-linked sandbox artifacts and open files with nonblocking,
+  no-follow descriptor checks so FIFO, socket, symlink, and device swaps fail
+  closed without hanging artifact collection.
+- Make the reference integration deny every OpenCode tool by default and use a
+  realpath-validated per-conversation directory outside Git worktrees. Hosts
+  must add their own OS or container boundary before allowing filesystem tools.
 - Load every runtime standard library explicitly and align the shipped
   permissions, observer, Turn, prompt, and instrumentation examples with the
   actual APIs.
 
 ### Changed
 
-- Test the supported runtime surface on Ruby 3.2, 3.3, 3.4, and 4.0.
+- Gate release on tests plus exact local package installation across Ruby 3.2,
+  3.3, 3.4, and 4.0 in a read-only verification job.
 - Pin every third-party CI and release action to an exact reviewed commit and
   use Ruby 4.0 for release builds.
 - Fail the trusted-publishing job before release when the pushed tag does not
   match `Opencode::RAILS_VERSION`.
+
+## 0.0.1.alpha8 - 2026-07-20
+
+### Unpublished
+
+- Superseded after the unrepaired `opencode-ruby` alpha8 package was yanked.
+  No `opencode-rails` alpha8 package was published; use the alpha9 lockstep
+  tuple.
 
 ## 0.0.1.alpha7 - 2026-07-18
 

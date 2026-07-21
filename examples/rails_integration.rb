@@ -76,11 +76,17 @@ class GenerateResponseJob < ApplicationJob
     unless user_message.conversation_id == conversation.id
       raise ArgumentError, "User and assistant messages must belong to the same conversation"
     end
-    client       = Opencode::Client.new(base_url: ENV.fetch("OPENCODE_URL"))
+    sandbox_directory = sandbox_directory_for(conversation)
+    client = Opencode::Client.new(
+      base_url: ENV.fetch("OPENCODE_URL"),
+      directory: sandbox_directory.to_s
+    )
 
     # Session: AR-coupled, row-locked, idempotent. ensure! creates the
     # OpenCode session if conversation.opencode_session_id is blank;
     # returns the existing id otherwise.
+    # Session applies permissions only when it creates a session.
+    # Recreate persisted sessions before deploying a directory or policy change.
     session = Opencode::Session.new(
       conversation,
       permissions_for: ->(record) { permission_rules_for(record) },
@@ -114,19 +120,41 @@ class GenerateResponseJob < ApplicationJob
 
   private
 
-  def permission_rules_for(conversation)
+  def permission_rules_for(_conversation)
     # Per-product permissions. The shape mirrors what
     # opencode-ruby's Client#create_session expects in `permissions:`.
     [
-      { permission: "bash", pattern: "*", action: "deny" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
-      { permission: "edit", pattern: "*", action: "deny" },
-      {
-        permission: "edit",
-        pattern: "data/sandbox/#{conversation.id}/**",
-        action: "allow"
-      }
+      { permission: "*", pattern: "*", action: "deny" }
     ]
+  end
+
+  def sandbox_directory_for(conversation)
+    # The root must be mounted at the same absolute path in the OpenCode server.
+    # Keeping it outside Git worktrees makes external_directory the boundary.
+    identifier = conversation.id.to_s
+    unless identifier.match?(/\A[0-9A-Za-z_-]+\z/)
+      raise ArgumentError, "Conversation id is not safe for a directory name"
+    end
+
+    root = Pathname.new(ENV.fetch("OPENCODE_SANDBOX_ROOT")).expand_path
+    root.mkpath
+    root = root.realpath
+    if root.ascend.any? { |directory| directory.join(".git").exist? }
+      raise ArgumentError, "OPENCODE_SANDBOX_ROOT must be outside every Git worktree"
+    end
+
+    directory = root.join(identifier)
+    directory.mkpath
+    stat = directory.lstat
+    unless stat.directory? && !stat.symlink?
+      raise ArgumentError, "Conversation sandbox must be a real directory"
+    end
+
+    resolved = directory.realpath
+    unless resolved.to_s.start_with?("#{root}#{File::SEPARATOR}")
+      raise ArgumentError, "Conversation sandbox escapes its root"
+    end
+    resolved
   end
 
   def build_system_context(conversation)
@@ -135,7 +163,7 @@ class GenerateResponseJob < ApplicationJob
     <<~CONTEXT
       User: #{conversation.user.name}
       Conversation: #{conversation.id}
-      Sandbox: /sandbox/#{conversation.id}
+      Sandbox: #{sandbox_directory_for(conversation)}
     CONTEXT
   end
 end

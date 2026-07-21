@@ -53,11 +53,21 @@ class ReadmeTest < Minitest::Test
 
   def test_quickstart_uses_current_fail_closed_permission_rules
     refute_match(/\{\s*type:/, @quickstart)
-    assert_includes @quickstart, '{ permission: "bash", pattern: "*", action: "deny" }'
-    assert_includes @quickstart, '{ permission: "external_directory", pattern: "*", action: "deny" }'
-    assert_includes @quickstart, '{ permission: "edit", pattern: "*", action: "deny" }'
-    assert_includes @quickstart, 'permission: "edit",'
-    assert_includes @quickstart, 'action: "allow"'
+    assert_includes @quickstart, 'sandbox_directory = sandbox_directory_for(conversation)'
+    assert_includes @quickstart, 'directory: sandbox_directory.to_s'
+    assert_includes @quickstart, '{ permission: "*", pattern: "*", action: "deny" }'
+    refute_includes @quickstart, 'action: "allow"'
+    assert_includes @quickstart, 'ENV.fetch("OPENCODE_SANDBOX_ROOT")'
+    assert_includes @quickstart, "root = root.realpath"
+    assert_includes @quickstart, 'directory.join(".git").exist?'
+    assert_includes @quickstart, 'identifier.match?(/\A[0-9A-Za-z_-]+\z/)'
+    assert_includes @quickstart, "stat = directory.lstat"
+    assert_includes @quickstart, "Conversation sandbox escapes its root"
+    assert_includes @readme, "must be outside every Git worktree"
+    assert_includes @readme, "same absolute path in the OpenCode server"
+    assert_match(/intentionally grants no\s+filesystem tools/, @readme)
+    assert_includes @readme, "permissions only when it creates a session"
+    assert_includes @readme, "recreate persisted sessions"
   end
 
   def test_quickstart_uses_the_enqueued_user_message

@@ -84,16 +84,19 @@ module Opencode
 
     def with_safe_file
       before = File.lstat(path)
-      raise UnsafeFileError, "Unsafe sandbox file: #{basename}" unless before.file? && !before.symlink?
+      unless before.file? && !before.symlink? && before.nlink == 1
+        raise UnsafeFileError, "Unsafe sandbox file: #{basename}"
+      end
 
       resolved = Pathname.new(path).realpath.to_s
       unless resolved.start_with?(sandbox_prefix)
         raise UnsafeFileError, "Sandbox file escapes its root: #{basename}"
       end
 
-      File.open(path, "rb") do |file|
+      flags = safe_open_flags
+      File.open(path, flags, encoding: Encoding::BINARY) do |file|
         opened = file.stat
-        unless opened.file? && opened.dev == before.dev && opened.ino == before.ino
+        unless opened.file? && opened.nlink == 1 && opened.dev == before.dev && opened.ino == before.ino
           raise UnsafeFileError, "Sandbox file changed while opening: #{basename}"
         end
         if opened.size > @max_bytes
@@ -102,8 +105,20 @@ module Opencode
 
         yield file
       end
-    rescue Errno::ENOENT, Errno::ELOOP => e
+    rescue SystemCallError => e
       raise UnsafeFileError, "Unsafe sandbox file #{basename}: #{e.message}"
+    end
+
+    def safe_open_flags
+      required = %i[NONBLOCK NOFOLLOW]
+      missing = required.reject { |name| File.const_defined?(name) }
+      unless missing.empty?
+        raise UnsafeFileError, "Platform cannot safely open sandbox files: missing #{missing.join(", ")}"
+      end
+
+      flags = File::RDONLY | File::NONBLOCK | File::NOFOLLOW
+      flags |= File::BINARY if File.const_defined?(:BINARY)
+      flags
     end
   end
 end
