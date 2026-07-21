@@ -37,19 +37,15 @@ class ExampleTest < Minitest::Test
 
   def test_example_uses_current_fail_closed_permission_rules
     refute_match(/\{\s*type:/, SOURCE)
-    assert_includes SOURCE, 'sandbox_directory = sandbox_directory_for(conversation)'
-    assert_includes SOURCE, 'directory: sandbox_directory.to_s'
+    assert_includes SOURCE, 'working_directory = File.realpath(ENV.fetch("OPENCODE_WORKING_DIRECTORY"))'
+    assert_includes SOURCE, "directory: working_directory"
     assert_includes SOURCE, '{ permission: "*", pattern: "*", action: "deny" }'
     refute_includes SOURCE, 'action: "allow"'
-    assert_includes SOURCE, 'ENV.fetch("OPENCODE_SANDBOX_ROOT")'
-    assert_includes SOURCE, "root = root.realpath"
-    assert_includes SOURCE, 'directory.join(".git").exist?'
-    assert_includes SOURCE, 'identifier.match?(/\A[0-9A-Za-z_-]+\z/)'
-    assert_includes SOURCE, "stat = directory.lstat"
-    assert_includes SOURCE, "Conversation sandbox escapes its root"
+    assert_includes SOURCE, "OPENCODE_DISABLE_PROJECT_CONFIG=1"
+    refute_includes SOURCE, "ConversationSandbox"
     assert_includes SOURCE, "permissions only when it creates a session"
     assert_match(/recreate persisted sessions/i, SOURCE)
-    refute_includes SOURCE, 'Sandbox: /sandbox/#{conversation.id}'
+    refute_includes SOURCE, "Sandbox:"
   end
 
   def test_example_permission_order_denies_every_tool

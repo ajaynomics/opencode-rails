@@ -28,6 +28,9 @@
 #   4. Permissions builder: per-product session permission rules.
 #
 # Contract-tested reference. Copy what you need and adapt it to your domain.
+# The OpenCode server process must run with
+# OPENCODE_DISABLE_PROJECT_CONFIG=1; session permissions are too late to
+# constrain project configuration, plugins, or instructions at bootstrap.
 
 # ----------------------------------------------------------------------
 # 1. config/initializers/opencode.rb
@@ -76,10 +79,10 @@ class GenerateResponseJob < ApplicationJob
     unless user_message.conversation_id == conversation.id
       raise ArgumentError, "User and assistant messages must belong to the same conversation"
     end
-    sandbox_directory = sandbox_directory_for(conversation)
+    working_directory = File.realpath(ENV.fetch("OPENCODE_WORKING_DIRECTORY"))
     client = Opencode::Client.new(
       base_url: ENV.fetch("OPENCODE_URL"),
-      directory: sandbox_directory.to_s
+      directory: working_directory
     )
 
     # Session: AR-coupled, row-locked, idempotent. ensure! creates the
@@ -128,42 +131,12 @@ class GenerateResponseJob < ApplicationJob
     ]
   end
 
-  def sandbox_directory_for(conversation)
-    # The root must be mounted at the same absolute path in the OpenCode server.
-    # Keeping it outside Git worktrees makes external_directory the boundary.
-    identifier = conversation.id.to_s
-    unless identifier.match?(/\A[0-9A-Za-z_-]+\z/)
-      raise ArgumentError, "Conversation id is not safe for a directory name"
-    end
-
-    root = Pathname.new(ENV.fetch("OPENCODE_SANDBOX_ROOT")).expand_path
-    root.mkpath
-    root = root.realpath
-    if root.ascend.any? { |directory| directory.join(".git").exist? }
-      raise ArgumentError, "OPENCODE_SANDBOX_ROOT must be outside every Git worktree"
-    end
-
-    directory = root.join(identifier)
-    directory.mkpath
-    stat = directory.lstat
-    unless stat.directory? && !stat.symlink?
-      raise ArgumentError, "Conversation sandbox must be a real directory"
-    end
-
-    resolved = directory.realpath
-    unless resolved.to_s.start_with?("#{root}#{File::SEPARATOR}")
-      raise ArgumentError, "Conversation sandbox escapes its root"
-    end
-    resolved
-  end
-
   def build_system_context(conversation)
     # System prompt context the agent gets. Your app probably already
     # has helpers for this; the gem doesn't impose a shape.
     <<~CONTEXT
       User: #{conversation.user.name}
       Conversation: #{conversation.id}
-      Sandbox: #{sandbox_directory_for(conversation)}
     CONTEXT
   end
 end

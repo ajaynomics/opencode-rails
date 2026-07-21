@@ -40,19 +40,19 @@ jobs:
       - name: Build gem
         run: gem build opencode-rails.gemspec
 
-      - name: Verify gems load after install
+      - name: Verify published client and installed gems
         run: |
-          client_dir="$(bundle show opencode-ruby)"
-          (cd "$client_dir" && gem build opencode-ruby.gemspec)
-          client_version="$(ruby -I"$client_dir/lib" -ropencode/version -e 'print Opencode::VERSION')"
-          client_gem="$client_dir/opencode-ruby-${client_version}.gem"
+          client_version="$(bundle exec ruby -ropencode/version -e 'print Opencode::VERSION')"
           rails_gem="opencode-rails-$(ruby -Ilib -ropencode/rails_version -e 'print Opencode::RAILS_VERSION').gem"
-          bundle_gem_path="$(bundle exec ruby -e 'puts Gem.path.join(":")')"
+          registry_dir="${RUNNER_TEMP}/opencode-ruby-registry-${{ matrix.ruby }}"
+          mkdir -p "$registry_dir"
+          (cd "$registry_dir" && gem fetch opencode-ruby --version "$client_version" --prerelease --clear-sources --source https://rubygems.org)
+          client_gem="$registry_dir/opencode-ruby-${client_version}.gem"
           export GEM_HOME="${RUNNER_TEMP}/opencode-rails-${{ matrix.ruby }}"
-          export GEM_PATH="${GEM_HOME}:${bundle_gem_path}"
+          export GEM_PATH="${GEM_HOME}"
           mkdir -p "$GEM_HOME"
-          gem install --local "$client_gem" --no-document
-          gem install --local "$rails_gem" --no-document
+          gem install "$client_gem" --no-document --clear-sources --source https://rubygems.org
+          gem install "$rails_gem" --no-document --clear-sources --source https://rubygems.org
           ruby -ropencode-rails -e '
             root = File.realpath(ENV.fetch("GEM_HOME"))
             %w[opencode-ruby opencode-rails].each do |name|

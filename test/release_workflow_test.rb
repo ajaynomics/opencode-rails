@@ -64,12 +64,18 @@ class ReleaseWorkflowTest < Minitest::Test
     commands = verify_job.fetch("steps").filter_map { |step| step["run"] }.join("\n")
     assert_includes commands, "bundle exec rake test"
     assert_includes commands, "gem build opencode-rails.gemspec"
-    assert_includes commands, "bundle exec ruby -e"
+    assert_includes commands, "bundle exec ruby -ropencode/version"
     assert_includes commands, 'GEM_HOME="${RUNNER_TEMP}/opencode-rails-${{ matrix.ruby }}"'
-    assert_includes commands, 'client_gem="$client_dir/opencode-ruby-${client_version}.gem"'
+    assert_includes commands, 'GEM_PATH="${GEM_HOME}"'
+    refute_includes commands, "Gem.path.join"
+    assert_includes commands, 'client_gem="$registry_dir/opencode-ruby-${client_version}.gem"'
     assert_includes commands, 'rails_gem="opencode-rails-$(ruby -Ilib -ropencode/rails_version'
-    assert_includes commands, 'gem install --local "$client_gem" --no-document'
-    assert_includes commands, 'gem install --local "$rails_gem" --no-document'
+    assert_includes commands, 'gem fetch opencode-ruby --version "$client_version" --prerelease'
+    assert_includes commands, "--clear-sources --source https://rubygems.org"
+    assert_includes commands,
+      'gem install "$client_gem" --no-document --clear-sources --source https://rubygems.org'
+    assert_includes commands,
+      'gem install "$rails_gem" --no-document --clear-sources --source https://rubygems.org'
     assert_includes commands, "Gem.loaded_specs.fetch(name).full_gem_path"
     assert_includes commands, "ruby -ropencode-rails"
   end

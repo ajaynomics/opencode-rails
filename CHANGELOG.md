@@ -19,9 +19,10 @@
 - Reject hard-linked sandbox artifacts and open files with nonblocking,
   no-follow descriptor checks so FIFO, socket, symlink, and device swaps fail
   closed without hanging artifact collection.
-- Make the reference integration deny every OpenCode tool by default and use a
-  realpath-validated per-conversation directory outside Git worktrees. Hosts
-  must add their own OS or container boundary before allowing filesystem tools.
+- Make the reference integration deny every OpenCode tool by default and
+  require project-local OpenCode configuration to be disabled at server
+  startup. Hosts must add their own OS or container boundary before allowing
+  filesystem tools.
 - Load every runtime standard library explicitly and align the shipped
   permissions, observer, Turn, prompt, and instrumentation examples with the
   actual APIs.
@@ -34,6 +35,8 @@
   use Ruby 4.0 for release builds.
 - Fail the trusted-publishing job before release when the pushed tag does not
   match `Opencode::RAILS_VERSION`.
+- Refuse to publish Rails until the RubyGems client package exists and loads
+  with the locally built Rails package in an isolated gem repository.
 
 ## 0.0.1.alpha8 - 2026-07-20
 

@@ -57,12 +57,15 @@ accepted turn without posting its prompt again, while hardening SSE framing.
 The unrepaired `opencode-ruby` 0.0.1.alpha8 package was yanked, and
 `opencode-rails` alpha8 was never published.
 `opencode-rails` 0.0.1.alpha9 is a release candidate and is not yet confirmed
-published on RubyGems. The
-`release.yml` workflow is prepared for RubyGems
-trusted publishing, but the gem's trusted publisher must be registered and
-verified for that workflow and its `release` environment. Until the registry
-result is verified, pushing a `v*` tag does not guarantee publication. Trusted
-publishing does not require a long-lived RubyGems API key.
+published on RubyGems. Because the gem has no RubyGems entry yet, create a
+pending trusted publisher for gem `opencode-rails`, repository owner
+`ajaynomics`, repository `opencode-rails`, workflow `release.yml`, and
+environment `release`. RubyGems converts it to a normal trusted publisher after
+the first successful push. The workflow also refuses to publish until the
+RubyGems `opencode-ruby` alpha9 package exists and installs and loads with the
+locally built Rails package. Until the registry result is verified, pushing a
+`v*` tag does not guarantee publication. Trusted publishing does not require a
+long-lived RubyGems API key.
 
 ## Quickstart
 
@@ -100,10 +103,10 @@ class GenerateResponseJob < ApplicationJob
     unless user_message.conversation_id == conversation.id
       raise ArgumentError, "User and assistant messages must belong to the same conversation"
     end
-    sandbox_directory = sandbox_directory_for(conversation)
+    working_directory = File.realpath(ENV.fetch("OPENCODE_WORKING_DIRECTORY"))
     client = Opencode::Client.new(
       base_url: ENV.fetch("OPENCODE_URL"),
-      directory: sandbox_directory.to_s
+      directory: working_directory
     )
 
     session = Opencode::Session.new(
@@ -139,43 +142,20 @@ class GenerateResponseJob < ApplicationJob
       { permission: "*", pattern: "*", action: "deny" }
     ]
   end
-
-  def sandbox_directory_for(conversation)
-    identifier = conversation.id.to_s
-    unless identifier.match?(/\A[0-9A-Za-z_-]+\z/)
-      raise ArgumentError, "Conversation id is not safe for a directory name"
-    end
-
-    root = Pathname.new(ENV.fetch("OPENCODE_SANDBOX_ROOT")).expand_path
-    root.mkpath
-    root = root.realpath
-    if root.ascend.any? { |directory| directory.join(".git").exist? }
-      raise ArgumentError, "OPENCODE_SANDBOX_ROOT must be outside every Git worktree"
-    end
-
-    directory = root.join(identifier)
-    directory.mkpath
-    stat = directory.lstat
-    unless stat.directory? && !stat.symlink?
-      raise ArgumentError, "Conversation sandbox must be a real directory"
-    end
-
-    resolved = directory.realpath
-    unless resolved.to_s.start_with?("#{root}#{File::SEPARATOR}")
-      raise ArgumentError, "Conversation sandbox escapes its root"
-    end
-    resolved
-  end
 end
 ```
 
-`OPENCODE_SANDBOX_ROOT` must be outside every Git worktree and mounted at the
-same absolute path in the OpenCode server. OpenCode treats an entire detected
-worktree as internal, so a directory inside the application repository is not
-an `external_directory` boundary. This quickstart intentionally grants no
-filesystem tools: OpenCode permissions alone are not an OS sandbox. Add
-product-specific allows only when the OpenCode process also has an independent
-container or operating-system boundary around the conversation directory.
+Run the OpenCode server with `OPENCODE_DISABLE_PROJECT_CONFIG=1`. OpenCode loads
+project configuration, plugins, and instructions while opening a directory,
+before session permissions exist; the wildcard deny rule cannot constrain that
+bootstrap. Point `OPENCODE_WORKING_DIRECTORY` at a pre-provisioned directory
+mounted at the same absolute path in Rails and OpenCode. Treat the server's
+global configuration, plugins, and instructions as privileged administrator
+code and verify the setting against the deployed OpenCode version.
+
+This quickstart intentionally grants no filesystem tools: OpenCode permissions
+alone are not an OS sandbox. Add product-specific allows only when the OpenCode
+process also has an independent container or operating-system boundary.
 
 `Opencode::Session` applies permissions only when it creates a session. Before
 deploying a directory or permission-policy change, recreate persisted sessions
