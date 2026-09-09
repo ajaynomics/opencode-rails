@@ -47,6 +47,9 @@ Gem::Specification.new do |spec|
   spec.add_runtime_dependency "activestorage", ">= 7.1", "< 9.0"
   spec.add_runtime_dependency "activesupport", ">= 7.1", "< 9.0"
 
-  spec.add_development_dependency "minitest", "~> 5.20"
+  # minitest 6 removed minitest/mock; Object#stub now ships in the extracted
+  # minitest-mock gem, which the suite uses to stub Net::HTTP, File and Tempfile.
+  spec.add_development_dependency "minitest", "~> 6.0"
+  spec.add_development_dependency "minitest-mock", "~> 5.27"
   spec.add_development_dependency "rake", "~> 13.0"
 end
