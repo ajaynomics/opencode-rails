@@ -38,7 +38,13 @@ Gem::Specification.new do |spec|
   # exactly (= not ~>) so that consumers always pick the version this gem
   # was tested against.
   spec.add_runtime_dependency "opencode-ruby", "= 0.0.1.alpha9"
-  spec.add_runtime_dependency "marcel", "~> 1.0"
+  # Rails edge moved activestorage to marcel ~> 2.0, and this gem depends on
+  # activestorage directly, so pinning ~> 1.0 makes it unresolvable alongside
+  # edge. marcel 2 requires Ruby >= 3.3 while this gem supports >= 3.2, so the
+  # bound is a permissive range rather than a bump: consumers on 3.3+ resolve
+  # marcel 2, consumers on 3.2 resolve marcel 1. The single call site,
+  # Marcel::MimeType.for(name:), behaves identically in both majors.
+  spec.add_runtime_dependency "marcel", ">= 1.0", "< 3"
 
   # Rails sub-libraries used at runtime. Depending on these individually
   # (instead of the `rails` umbrella) avoids forcing host apps to load
